@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
 
 @theme {
   /* Brand Colors - Rose/Pink */
@@ -151,3 +151,29 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--background); }
 ::-webkit-scrollbar-thumb { background: #e11d48; border-radius: 3px; }
+
+/* ── Responsive Container ── */
+* { min-width: 0; }
+
+/* ── Card hover effect ── */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+}
+
+/* ── Sidebar width fix on very small screens ── */
+@media (max-width: 360px) {
+  aside { width: 100% !important; }
+}
+
+/* ── Dark mode chart override ── */
+.dark .recharts-cartesian-grid line { stroke: #334155; }
+.dark .recharts-text { fill: #94a3b8; }
+
+/* ── Smooth transitions ── */
+a, button { transition-property: color, background-color, border-color, transform, box-shadow; transition-duration: 150ms; transition-timing-function: ease; }
+
+/* ── Focus visible ── */
+:focus-visible { outline: 2px solid #e11d48; outline-offset: 2px; border-radius: 6px; }

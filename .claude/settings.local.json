@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"//.*bg-white\")",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "mcp__claude_ai_Supabase__list_organizations",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__claude_ai_Supabase__get_advisors",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__apply_migration",
+      "mcp__claude_ai_supabase__get_project_url",
+      "mcp__claude_ai_supabase__execute_sql",
+      "mcp__claude_ai_supabase__apply_migration",
+      "mcp__claude_ai_supabase__list_tables"
+    ]
+  }
+}
