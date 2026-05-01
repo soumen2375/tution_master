@@ -1,122 +1,196 @@
+import { useState, useEffect, useMemo } from 'react';
+import { supabase } from '@/lib/supabase';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-  IndianRupee,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
-  Download,
-  ChevronRight
-} from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { formatCurrency, formatDate } from '@/lib/utils';
+  faMoneyBillWave, faCheckCircle, faClock, faCircleXmark,
+  faFilter, faCalendar, faIndianRupeeSign,
+} from '@fortawesome/free-solid-svg-icons';
+import EmptyState from '@/components/shared/EmptyState';
+import { TableRowSkeleton } from '@/components/shared/SkeletonLoader';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
 
-export default function StudentFeesPage() {
-  const payments = [
-    { id: '1', month: 'April', year: 2026, amount: 500, status: 'PAID', date: '2026-04-05', method: 'UPI' },
-    { id: '2', month: 'March', year: 2026, amount: 500, status: 'PAID', date: '2026-03-02', method: 'Cash' },
-    { id: '3', month: 'February', year: 2026, amount: 500, status: 'PAID', date: '2026-02-08', method: 'UPI' },
-    { id: '4', month: 'January', year: 2026, amount: 500, status: 'PAID', date: '2026-01-05', method: 'UPI' },
-  ];
+interface FeeRow {
+  id: string;
+  batch_name: string;
+  batch_id: string;
+  amount: number;
+  status: 'PENDING' | 'PAID' | 'OVERDUE';
+  due_date: string | null;
+  paid_at: string | null;
+  month_label: string | null;
+}
+
+interface Batch { id: string; name: string; }
+
+const STATUS_COLOR: Record<string, string> = {
+  PAID: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  PENDING: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  OVERDUE: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+};
+
+export default function FeesPage() {
+  const [fees, setFees] = useState<FeeRow[]>([]);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [batchFilter, setBatchFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: student } = await supabase.from('student_profiles').select('id').eq('user_id', user.id).single();
+        if (!student) return;
+
+        const { data: enrollments } = await supabase
+          .from('enrollments')
+          .select('batch_id, batch:batches(name)')
+          .eq('student_id', student.id)
+          .eq('status', 'ACTIVE');
+
+        const batchList: Batch[] = (enrollments || []).map((e: any) => ({ id: e.batch_id, name: e.batch?.name || '' }));
+        setBatches(batchList);
+
+        const { data: feeData, error } = await supabase
+          .from('fee_payments')
+          .select('id, batch_id, amount, status, due_date, paid_at, month_label, batch:batches(name)')
+          .eq('student_id', student.id)
+          .order('due_date', { ascending: false });
+
+        if (error) throw error;
+        setFees((feeData || []).map((f: any) => ({
+          id: f.id,
+          batch_id: f.batch_id,
+          batch_name: f.batch?.name || '',
+          amount: Number(f.amount),
+          status: f.status,
+          due_date: f.due_date,
+          paid_at: f.paid_at,
+          month_label: f.month_label,
+        })));
+      } catch (e: any) { toast.error('Failed to load fees'); }
+      finally { setLoading(false); }
+    }
+    load();
+  }, []);
+
+  const filtered = useMemo(() => {
+    let f = fees;
+    if (batchFilter) f = f.filter(r => r.batch_id === batchFilter);
+    if (statusFilter) f = f.filter(r => r.status === statusFilter);
+    return f;
+  }, [fees, batchFilter, statusFilter]);
+
+  const stats = useMemo(() => ({
+    total: fees.reduce((s, f) => s + f.amount, 0),
+    paid: fees.filter(f => f.status === 'PAID').reduce((s, f) => s + f.amount, 0),
+    pending: fees.filter(f => f.status === 'PENDING').reduce((s, f) => s + f.amount, 0),
+    overdue: fees.filter(f => f.status === 'OVERDUE').reduce((s, f) => s + f.amount, 0),
+  }), [fees]);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 animate-fade-in">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Fee History</h2>
-        <p className="text-muted-foreground">Detailed record of your payments and receipts.</p>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Fees</h2>
+        <p className="text-sm text-slate-500 mt-0.5">{fees.length} records total</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {/* Left Column - History */}
-        <div className="md:col-span-2 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Payments</CardTitle>
-              <CardDescription>Click on a payment to download the receipt.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {payments.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between p-4 rounded-xl border bg-white dark:bg-slate-800 group hover:border-primary transition-all cursor-pointer">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 flex items-center justify-center font-bold border border-green-100 dark:border-green-900">
-                        <CheckCircle2 size={24} />
+      {!loading && fees.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            { label: 'Total Billed', value: `₹${stats.total.toLocaleString('en-IN')}`, icon: faIndianRupeeSign, color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-100 dark:bg-indigo-900/30' },
+            { label: 'Paid', value: `₹${stats.paid.toLocaleString('en-IN')}`, icon: faCheckCircle, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-900/30' },
+            { label: 'Pending', value: `₹${stats.pending.toLocaleString('en-IN')}`, icon: faClock, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/30' },
+            { label: 'Overdue', value: `₹${stats.overdue.toLocaleString('en-IN')}`, icon: faCircleXmark, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-100 dark:bg-red-900/30' },
+          ].map(s => (
+            <div key={s.label} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-slate-500">{s.label}</p>
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${s.bg} ${s.color}`}>
+                  <FontAwesomeIcon icon={s.icon} className="text-xs" />
+                </div>
+              </div>
+              <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        {batches.length > 1 && (
+          <div className="relative">
+            <FontAwesomeIcon icon={faFilter} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
+            <select value={batchFilter} onChange={e => setBatchFilter(e.target.value)}
+              className="pl-9 pr-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer">
+              <option value="">All Batches</option>
+              {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+        )}
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer">
+          <option value="">All Status</option>
+          <option value="PENDING">Pending</option>
+          <option value="PAID">Paid</option>
+          <option value="OVERDUE">Overdue</option>
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+        {loading ? (
+          <table className="data-table"><tbody>{Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={5} />)}</tbody></table>
+        ) : filtered.length === 0 ? (
+          <EmptyState icon={faMoneyBillWave} title="No Fee Records"
+            description={batchFilter || statusFilter ? 'Try adjusting your filters.' : 'Your fee records will appear here.'} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Batch</th>
+                  <th>Month</th>
+                  <th>Amount</th>
+                  <th>Due Date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(fee => (
+                  <tr key={fee.id}>
+                    <td><span className="text-sm font-medium text-slate-900 dark:text-slate-100">{fee.batch_name}</span></td>
+                    <td><span className="text-sm text-slate-500">{fee.month_label || '—'}</span></td>
+                    <td>
+                      <div className="flex items-center gap-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        <FontAwesomeIcon icon={faIndianRupeeSign} className="text-xs text-slate-400" />
+                        {fee.amount.toLocaleString('en-IN')}
                       </div>
+                    </td>
+                    <td>
+                      {fee.due_date ? (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                          <FontAwesomeIcon icon={faCalendar} className="text-slate-400" />
+                          {format(new Date(fee.due_date), 'dd MMM yyyy')}
+                        </div>
+                      ) : <span className="text-xs text-slate-400">—</span>}
+                    </td>
+                    <td>
                       <div>
-                        <h4 className="font-bold text-sm tracking-tight">{p.month} {p.year}</h4>
-                        <p className="text-xs text-muted-foreground uppercase font-bold tracking-widest">{p.method} • {formatDate(p.date)}</p>
+                        <span className={`badge ${STATUS_COLOR[fee.status] || STATUS_COLOR.PENDING}`}>{fee.status}</span>
+                        {fee.status === 'PAID' && fee.paid_at && (
+                          <p className="text-xs text-slate-400 mt-0.5">Paid {format(new Date(fee.paid_at), 'dd MMM')}</p>
+                        )}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="text-right">
-                        <p className="text-sm font-black italic">{formatCurrency(p.amount)}</p>
-                        <p className="text-[10px] text-green-600 font-bold uppercase">Success</p>
-                      </div>
-                      <Button variant="ghost" size="icon" className="group-hover:text-primary transition-colors">
-                        <Download size={18} />
-                      </Button>
-                    </div>
-                  </div>
+                    </td>
+                  </tr>
                 ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Right Column - Status/Action */}
-        <div className="space-y-8">
-          <Card className="border-none shadow-xl bg-primary text-primary-foreground overflow-hidden relative">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-16 translate-x-16" />
-            <CardHeader>
-              <CardTitle className="text-lg">Current Status</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6 relative z-10">
-              <div>
-                <p className="text-[10px] uppercase font-bold text-primary-foreground/60 mb-1">Billing Month</p>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-bold tracking-tight">May 2026</h3>
-                  <span className="px-2 py-0.5 rounded bg-white text-primary text-[10px] font-bold uppercase">Upcoming</span>
-                </div>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase font-bold text-primary-foreground/60 mb-1">Amount Due</p>
-                <h3 className="text-4xl font-black italic">{formatCurrency(500)}</h3>
-              </div>
-              <div className="space-y-2 pt-4 border-t border-white/20">
-                <p className="text-xs font-medium text-white/80 flex items-center gap-2">
-                  <Clock size={14} /> Due By: 10 May 2026
-                </p>
-                <p className="text-xs font-medium text-white/80 flex items-center gap-2">
-                  <AlertCircle size={14} /> Late fee after: 15 May 2026
-                </p>
-              </div>
-            </CardContent>
-            <CardFooter className="pt-0 relative z-10">
-              <Button size="lg" className="w-full bg-white text-primary hover:bg-white/90 font-bold group">
-                Pay Now <ChevronRight size={18} className="ml-2 group-hover:translate-x-1 transition-transform" />
-              </Button>
-            </CardFooter>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">UPI Instructions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Scan and pay using any UPI app (PhonePe, GPay, Paytm).
-                Please send a screenshot of the payment to your teacher for verification.
-              </p>
-              <div className="p-4 rounded-xl bg-secondary/30 flex items-center justify-center border-2 border-dashed border-primary/20">
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-24 h-24 bg-white border rounded-lg flex items-center justify-center text-muted-foreground italic text-[10px]">
-                    QR CODE AREA
-                  </div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-primary">UPI: tution@bank</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

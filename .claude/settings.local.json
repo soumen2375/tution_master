@@ -12,7 +12,11 @@
       "mcp__claude_ai_supabase__get_project_url",
       "mcp__claude_ai_supabase__execute_sql",
       "mcp__claude_ai_supabase__apply_migration",
-      "mcp__claude_ai_supabase__list_tables"
+      "mcp__claude_ai_supabase__list_tables",
+      "Bash(git checkout *)",
+      "Bash(npm install *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

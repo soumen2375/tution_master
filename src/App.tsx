@@ -24,17 +24,19 @@ import TeacherFeesPage from '@/pages/teacher/FeesPage';
 import MaterialsPage from '@/pages/teacher/MaterialsPage';
 import StudentsPage from '@/pages/teacher/StudentsPage';
 import AnnouncementsPage from '@/pages/teacher/AnnouncementsPage';
+import TeacherAttendancePage from '@/pages/teacher/AttendancePage';
 import TeacherSettingsPage from '@/pages/teacher/SettingsPage';
 
 // Student Pages
 import StudentLayout from '@/pages/student/StudentLayout';
 import StudentDashboard from '@/pages/student/DashboardPage';
+import StudentBatches from '@/pages/student/BatchesPage';
 import StudentAttendance from '@/pages/student/AttendancePage';
 import StudentFees from '@/pages/student/FeesPage';
 import StudentNotes from '@/pages/student/NotesPage';
-import StudentLectures from '@/pages/student/LecturesPage';
 import StudentProgress from '@/pages/student/ProgressPage';
 import JoinBatch from '@/pages/student/JoinPage';
+import StudentSettings from '@/pages/student/SettingsPage';
 
 export default function App() {
   return (
@@ -66,6 +68,7 @@ export default function App() {
               <Route path="batches/:id" element={<BatchDetailPage />} />
               <Route path="students" element={<StudentsPage />} />
               <Route path="fees" element={<TeacherFeesPage />} />
+              <Route path="attendance" element={<TeacherAttendancePage />} />
               <Route path="materials" element={<MaterialsPage />} />
               <Route path="announcements" element={<AnnouncementsPage />} />
               <Route path="settings" element={<TeacherSettingsPage />} />
@@ -75,12 +78,13 @@ export default function App() {
             <Route path="/student" element={<StudentLayout />}>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<StudentDashboard />} />
+              <Route path="batches" element={<StudentBatches />} />
               <Route path="attendance" element={<StudentAttendance />} />
               <Route path="fees" element={<StudentFees />} />
               <Route path="notes" element={<StudentNotes />} />
-              <Route path="lectures" element={<StudentLectures />} />
               <Route path="progress" element={<StudentProgress />} />
               <Route path="join" element={<JoinBatch />} />
+              <Route path="settings" element={<StudentSettings />} />
             </Route>
 
             {/* ── Fallback ── */}
