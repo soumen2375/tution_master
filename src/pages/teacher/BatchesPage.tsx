@@ -1,168 +1,323 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-  Plus,
-  Search,
-  Filter,
-  MoreVertical,
-  Users,
-  MapPin,
-  Globe,
-  Calendar,
-  IndianRupee,
-  Copy,
-  Check
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+  faPlus, faChalkboard, faUsers, faLink, faPen,
+  faTrash, faEye, faEyeSlash, faCopy, faCheck,
+  faShareNodes, faCalendar, faIndianRupeeSign,
+} from '@fortawesome/free-solid-svg-icons';
+import Modal from '@/components/shared/Modal';
+import EmptyState from '@/components/shared/EmptyState';
+import { CardSkeleton } from '@/components/shared/SkeletonLoader';
 import { toast } from 'sonner';
 
+const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const SUBJECTS = ['Mathematics','Physics','Chemistry','Biology','English','Hindi','Social Science','Computer Science','Economics','History','Other'];
+
+const batchSchema = z.object({
+  name: z.string().min(2,'Name required'),
+  subject: z.string().min(1,'Subject required'),
+  description: z.string().optional(),
+  type: z.enum(['OFFLINE','ONLINE','HYBRID']),
+  start_date: z.string().min(1,'Start date required'),
+  monthly_fee: z.number().min(0),
+  max_students: z.number().min(1).max(500),
+  meeting_link: z.string().optional(),
+  is_public: z.boolean(),
+});
+type BatchForm = z.infer<typeof batchSchema>;
+
+interface Batch {
+  id: string; name: string; subject: string; description?: string;
+  type: string; status: string; start_date: string;
+  monthly_fee: number; max_students: number; invite_code: string;
+  meeting_link?: string; is_public: boolean;
+  enrollments?: {count:number}[];
+}
+
+const STATUS_COLOR: Record<string,string> = {
+  ACTIVE:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  PAUSED:    'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  COMPLETED: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400',
+  UPCOMING:  'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
+};
+
 export default function BatchesPage() {
-  const [batches, setBatches] = useState<Record<string, unknown>[]>([]);
+  const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<Batch|null>(null);
+  const [editing, setEditing] = useState<Batch|null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [revealedCodes, setRevealedCodes] = useState<Set<string>>(new Set());
+  const [copiedCode, setCopiedCode] = useState<string|null>(null);
+  const [teacherId, setTeacherId] = useState<string|null>(null);
 
-  useEffect(() => {
-    async function fetchBatches() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+  const { register, handleSubmit, reset, setValue, watch, formState:{errors} } = useForm<BatchForm>({
+    resolver: zodResolver(batchSchema),
+    defaultValues: { type:'OFFLINE', monthly_fee:0, max_students:30, is_public:false },
+  });
 
-      const { data: teacher } = await supabase
-        .from('teacher_profiles')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
+  useEffect(()=>{ loadData(); },[]);
 
-      if (teacher) {
-        const { data } = await supabase
-          .from('batches')
-          .select('*, enrollments(count)')
-          .eq('teacher_id', teacher.id)
-          .order('created_at', { ascending: false });
+  async function loadData() {
+    setLoading(true);
+    const { data:{user} } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data:tp } = await supabase.from('teacher_profiles').select('id').eq('user_id',user.id).single();
+    if (!tp) return;
+    setTeacherId(tp.id);
+    const { data, error } = await supabase.from('batches')
+      .select('*, enrollments(count)').eq('teacher_id',tp.id).order('created_at',{ascending:false});
+    if (error) toast.error('Failed to load batches');
+    else setBatches(data||[]);
+    setLoading(false);
+  }
 
-        setBatches(data || []);
+  function openCreate() { reset({ type:'OFFLINE', monthly_fee:0, max_students:30, is_public:false }); setEditing(null); setModalOpen(true); }
+  function openEdit(b: Batch) {
+    setEditing(b);
+    reset({ name:b.name, subject:b.subject, description:b.description||'', type:b.type as 'OFFLINE'|'ONLINE'|'HYBRID',
+      start_date:b.start_date, monthly_fee:b.monthly_fee, max_students:b.max_students,
+      meeting_link:b.meeting_link||'', is_public:b.is_public });
+    setModalOpen(true);
+  }
+
+  async function onSubmit(data: BatchForm) {
+    if (!teacherId) return;
+    setSaving(true);
+    try {
+      if (editing) {
+        const { error } = await supabase.from('batches').update(data).eq('id',editing.id);
+        if (error) throw error;
+        setBatches(prev => prev.map(b => b.id===editing.id ? {...b,...data} : b));
+        toast.success('Batch updated');
+      } else {
+        const invite_code = Math.random().toString(36).substring(2,8).toUpperCase();
+        const { data:nb, error } = await supabase.from('batches')
+          .insert({ ...data, teacher_id:teacherId, invite_code, schedule:[] }).select().single();
+        if (error) throw error;
+        setBatches(prev => [nb,...prev]);
+        toast.success('Batch created successfully');
       }
-      setLoading(false);
-    }
-    fetchBatches();
-  }, []);
+      setModalOpen(false);
+    } catch (e:unknown) { toast.error((e as Error).message); }
+    finally { setSaving(false); }
+  }
 
-  const copyInviteCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedId(code);
-    toast.success('Invite code copied!');
-    setTimeout(() => setCopiedId(null), 2000);
-  };
+  async function handleDelete() {
+    if (!deleteModal) return;
+    setDeleting(true);
+    try {
+      await supabase.from('enrollments').delete().eq('batch_id',deleteModal.id);
+      const { error } = await supabase.from('batches').delete().eq('id',deleteModal.id);
+      if (error) throw error;
+      setBatches(prev => prev.filter(b => b.id!==deleteModal.id));
+      toast.success('Batch deleted');
+      setDeleteModal(null);
+    } catch (e:unknown) { toast.error((e as Error).message); }
+    finally { setDeleting(false); }
+  }
 
-  const filteredBatches = batches.filter(b =>
-    (b.name as string).toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (b.subject as string).toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  function toggleReveal(id:string) {
+    setRevealedCodes(prev => { const s=new Set(prev); s.has(id)?s.delete(id):s.add(id); return s; });
+  }
+  async function copyCode(code:string) {
+    await navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(()=>setCopiedCode(null),2000);
+    toast.success('Join code copied!');
+  }
+
+  const enrollCount = (b:Batch) => b.enrollments?.[0]?.count ?? 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Your Batches</h2>
-          <p className="text-muted-foreground">Manage your classes and invitation codes.</p>
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Batches</h2>
+          <p className="text-sm text-slate-500 mt-0.5">{batches.length} total</p>
         </div>
-        <Link to="/teacher/batches/new">
-          <Button><Plus className="mr-2" size={18} /> Create New Batch</Button>
-        </Link>
+        <button onClick={openCreate}
+          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer">
+          <FontAwesomeIcon icon={faPlus}/> New Batch
+        </button>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
-          <Input
-            placeholder="Search batches or subjects..."
-            className="pl-10"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <Button variant="outline"><Filter className="mr-2" size={18} /> Filter</Button>
-      </div>
-
+      {/* Grid */}
       {loading ? (
-        <div className="text-center py-20 text-muted-foreground italic">Loading your batches...</div>
-      ) : filteredBatches.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredBatches.map((batch) => (
-            <Card key={batch.id as string} className="group hover:border-primary transition-colors overflow-hidden">
-              <CardHeader className="pb-4">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <CardTitle className="text-xl font-bold">{batch.name as string}</CardTitle>
-                    <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">{batch.subject as string}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {Array.from({length:3}).map((_,i)=><CardSkeleton key={i}/>)}
+        </div>
+      ) : batches.length===0 ? (
+        <EmptyState icon={faChalkboard} title="No Batches Yet"
+          description="Create your first batch to start managing students and classes."
+          action={{ label:'+ Create Batch', onClick:openCreate }}/>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {batches.map(b=>(
+            <div key={b.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
+              {/* Card header */}
+              <div className="p-5 flex-1">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">{b.name}</h3>
+                    <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium">{b.subject}</p>
                   </div>
-                  <Button variant="ghost" size="icon"><MoreVertical size={18} /></Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4 pb-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Users size={16} />
-                    <span>{(batch.enrollments as { count: number }[])[0]?.count || 0} / {batch.max_students as number} Students</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    {batch.type === 'OFFLINE' ? <MapPin size={16} /> : <Globe size={16} />}
-                    <span className="capitalize">{(batch.type as string).toLowerCase()}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Calendar size={16} />
-                    <span>Active</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <IndianRupee size={16} />
-                    <span>₹{batch.monthly_fee as number} / mo</span>
-                  </div>
+                  <span className={`badge shrink-0 ${STATUS_COLOR[b.status]||STATUS_COLOR.ACTIVE}`}>{b.status}</span>
                 </div>
 
-                <div className="p-3 bg-secondary/30 rounded-lg flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground mb-0.5">Invite Code</p>
-                    <p className="font-mono font-bold tracking-widest text-lg">{batch.invite_code as string}</p>
+                {b.description && <p className="text-xs text-slate-500 mb-3 line-clamp-2">{b.description}</p>}
+
+                <div className="space-y-1.5 text-xs text-slate-500">
+                  <div className="flex items-center gap-2">
+                    <FontAwesomeIcon icon={faUsers} className="w-3.5 text-slate-400"/>
+                    <span>{enrollCount(b)} / {b.max_students} students</span>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => copyInviteCode(batch.invite_code as string)}
-                    className="hover:bg-primary/10 hover:text-primary"
-                  >
-                    {copiedId === batch.invite_code ? <Check size={18} className="text-green-600" /> : <Copy size={18} />}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <FontAwesomeIcon icon={faIndianRupeeSign} className="w-3.5 text-slate-400"/>
+                    <span>₹{b.monthly_fee.toLocaleString('en-IN')}/month</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FontAwesomeIcon icon={faCalendar} className="w-3.5 text-slate-400"/>
+                    <span>Started {new Date(b.start_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>
+                  </div>
+                  {b.meeting_link && (
+                    <div className="flex items-center gap-2">
+                      <FontAwesomeIcon icon={faLink} className="w-3.5 text-slate-400"/>
+                      <a href={b.meeting_link} target="_blank" rel="noreferrer"
+                        className="text-indigo-600 hover:underline truncate">{b.type} link</a>
+                    </div>
+                  )}
                 </div>
-              </CardContent>
-              <CardFooter className="pt-0">
-                <Link to={`/teacher/batches/${batch.id as string}`} className="w-full">
-                  <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                    Manage Batch
-                  </Button>
-                </Link>
-              </CardFooter>
-            </Card>
+
+                {/* Invite code */}
+                {b.invite_code && (
+                  <div className="mt-3 flex items-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <span className="text-xs text-slate-500 shrink-0">Join Code:</span>
+                    <span className={`flex-1 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200 ${!revealedCodes.has(b.id)?'blur-sm':''}`}>
+                      {b.invite_code}
+                    </span>
+                    <button onClick={()=>toggleReveal(b.id)}
+                      className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer">
+                      <FontAwesomeIcon icon={revealedCodes.has(b.id)?faEyeSlash:faEye} className="text-xs"/>
+                    </button>
+                    <button onClick={()=>copyCode(b.invite_code)}
+                      className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-indigo-600 cursor-pointer">
+                      <FontAwesomeIcon icon={copiedCode===b.invite_code?faCheck:faCopy} className="text-xs"/>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex items-center gap-2">
+                <button onClick={()=>openEdit(b)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer">
+                  <FontAwesomeIcon icon={faPen}/>Edit
+                </button>
+                <button onClick={()=>copyCode(b.invite_code)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer">
+                  <FontAwesomeIcon icon={faShareNodes}/>Share
+                </button>
+                <button onClick={()=>setDeleteModal(b)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors cursor-pointer ml-auto">
+                  <FontAwesomeIcon icon={faTrash}/>Delete
+                </button>
+              </div>
+            </div>
           ))}
         </div>
-      ) : (
-        <Card className="border-dashed border-2 py-20 text-center bg-secondary/5">
-          <CardContent className="flex flex-col items-center gap-4">
-            <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center text-muted-foreground mb-2">
-              <Calendar size={32} />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-xl font-bold">No batches found</h3>
-              <p className="text-muted-foreground">Start by creating your first tuition batch.</p>
-            </div>
-            <Link to="/teacher/batches/new">
-              <Button>Create Batch Now</Button>
-            </Link>
-          </CardContent>
-        </Card>
       )}
+
+      {/* Create/Edit Modal */}
+      <Modal open={modalOpen} onClose={()=>setModalOpen(false)} title={editing?'Edit Batch':'Create New Batch'} size="lg"
+        footer={<>
+          <button onClick={()=>setModalOpen(false)} disabled={saving}
+            className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg cursor-pointer">
+            Cancel
+          </button>
+          <button onClick={handleSubmit(onSubmit)} disabled={saving}
+            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer disabled:opacity-60">
+            {saving?'Saving...':(editing?'Save Changes':'Create Batch')}
+          </button>
+        </>}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Batch Name *</label>
+              <input {...register('name')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" placeholder="e.g. Class 10 Maths A"/>
+              {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name.message}</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Subject *</label>
+              <select {...register('subject')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="">Select subject</option>
+                {SUBJECTS.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+              {errors.subject && <p className="text-xs text-red-500 mt-1">{errors.subject.message}</p>}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Description</label>
+            <textarea {...register('description')} rows={2} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none resize-none" placeholder="Brief description of this batch..."/>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Type</label>
+              <select {...register('type')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="OFFLINE">Offline</option><option value="ONLINE">Online</option><option value="HYBRID">Hybrid</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Monthly Fee (₹)</label>
+              <input type="number" {...register('monthly_fee',{valueAsNumber:true})} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0"/>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Max Students</label>
+              <input type="number" {...register('max_students',{valueAsNumber:true})} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="30"/>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Start Date *</label>
+              <input type="date" {...register('start_date')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none"/>
+              {errors.start_date && <p className="text-xs text-red-500 mt-1">{errors.start_date.message}</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Meeting Link</label>
+              <input {...register('meeting_link')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="https://meet.google.com/..."/>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input type="checkbox" id="is_public" {...register('is_public')} className="w-4 h-4 text-indigo-600 rounded border-slate-300 cursor-pointer"/>
+            <label htmlFor="is_public" className="text-sm text-slate-700 dark:text-slate-300 cursor-pointer">Make this batch discoverable publicly</label>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete confirm */}
+      <Modal open={!!deleteModal} onClose={()=>setDeleteModal(null)} title="Delete Batch" size="sm"
+        footer={<>
+          <button onClick={()=>setDeleteModal(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg cursor-pointer">Cancel</button>
+          <button onClick={handleDelete} disabled={deleting}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer disabled:opacity-60">
+            {deleting?'Deleting...':'Yes, Delete'}
+          </button>
+        </>}>
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          This will permanently delete <span className="font-semibold text-slate-900 dark:text-slate-100">{deleteModal?.name}</span> and unenroll all students. This cannot be undone.
+        </p>
+      </Modal>
     </div>
   );
 }

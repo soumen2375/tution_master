@@ -1,187 +1,168 @@
 import { useState, useEffect } from 'react';
-import { TrendingUp, Star, BookOpen, Calendar, Award } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { getStudentProgress } from '@/lib/api/progress';
-import { getStudentAttendance } from '@/lib/api/sessions';
 import { supabase } from '@/lib/supabase';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import type { ProgressRecord } from '@/lib/types';
-import { cn } from '@/lib/utils';
-import { StatCard } from '@/components/shared/StatCard';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faArrowTrendUp, faCalendarDays, faCheckCircle,
+  faCircleXmark, faClock,
+} from '@fortawesome/free-solid-svg-icons';
+import EmptyState from '@/components/shared/EmptyState';
+import { toast } from 'sonner';
 
-const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+interface BatchProgress {
+  batch_id: string;
+  batch_name: string;
+  total: number;
+  present: number;
+  late: number;
+  absent: number;
+  pct: number | null;
+}
 
-export default function StudentProgressPage() {
-  const [records, setRecords] = useState<ProgressRecord[]>([]);
+export default function ProgressPage() {
+  const [batchProgress, setBatchProgress] = useState<BatchProgress[]>([]);
   const [loading, setLoading] = useState(true);
-  const [overallStats, setOverallStats] = useState({ totalSessions: 0, totalPresent: 0, avgAttendance: 0 });
 
   useEffect(() => {
     async function load() {
       try {
-        const data = await getStudentProgress();
-        setRecords(data);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: student } = await supabase.from('student_profiles').select('id').eq('user_id', user.id).single();
+        if (!student) return;
 
-        if (data.length > 0) {
-          const totalSessions = data.reduce((s, r) => s + r.total_sessions, 0);
-          const totalPresent = data.reduce((s, r) => s + r.present_count, 0);
-          const avgAttendance = totalSessions > 0 ? (totalPresent / totalSessions) * 100 : 0;
-          setOverallStats({ totalSessions, totalPresent, avgAttendance: Math.round(avgAttendance) });
-        }
-      } catch { /* ignore */ } finally {
-        setLoading(false);
-      }
+        const { data: enrollments } = await supabase
+          .from('enrollments')
+          .select('batch_id, batch:batches(name)')
+          .eq('student_id', student.id)
+          .eq('status', 'ACTIVE');
+
+        const batchMap = new Map<string, string>();
+        (enrollments || []).forEach((e: any) => batchMap.set(e.batch_id, e.batch?.name || ''));
+        const batchIds = Array.from(batchMap.keys());
+        if (!batchIds.length) { setLoading(false); return; }
+
+        const { data: attData } = await supabase
+          .from('attendance_records')
+          .select('status, session:attendance_sessions(batch_id)')
+          .eq('student_id', student.id);
+
+        const progMap = new Map<string, { total: number; present: number; late: number; absent: number }>();
+        batchIds.forEach(id => progMap.set(id, { total: 0, present: 0, late: 0, absent: 0 }));
+        (attData || []).forEach((a: any) => {
+          const bid = a.session?.batch_id;
+          if (bid && progMap.has(bid)) {
+            const entry = progMap.get(bid)!;
+            entry.total++;
+            if (a.status === 'PRESENT') entry.present++;
+            else if (a.status === 'LATE') entry.late++;
+            else entry.absent++;
+          }
+        });
+
+        const prog: BatchProgress[] = batchIds.map(id => {
+          const e = progMap.get(id)!;
+          return {
+            batch_id: id,
+            batch_name: batchMap.get(id) || '',
+            ...e,
+            pct: e.total > 0 ? Math.round(((e.present + e.late) / e.total) * 100) : null,
+          };
+        });
+        setBatchProgress(prog);
+      } catch (e: any) { toast.error('Failed to load progress'); }
+      finally { setLoading(false); }
     }
     load();
   }, []);
 
-  // Prepare chart data (last 6 months)
-  const chartData = [...records]
-    .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
-    .slice(-6)
-    .map(r => ({
-      month: `${MONTH_NAMES[r.month - 1]} ${r.year}`,
-      attendance: r.attendance_pct,
-      examScore: r.exam_score && r.exam_total ? Math.round((r.exam_score / r.exam_total) * 100) : null,
-    }));
+  const overall = batchProgress.length > 0 ? (() => {
+    const total = batchProgress.reduce((s, b) => s + b.total, 0);
+    const present = batchProgress.reduce((s, b) => s + b.present + b.late, 0);
+    return total > 0 ? Math.round((present / total) * 100) : null;
+  })() : null;
 
-  const getAttendanceColor = (pct: number) =>
-    pct >= 80 ? 'text-green-600' : pct >= 60 ? 'text-amber-600' : 'text-red-500';
-
-  const getStars = (rating: number | null) =>
-    rating ? Array.from({ length: 5 }, (_, i) => i < rating ? '★' : '☆').join('') : null;
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="h-8 w-48 rounded skeleton" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[1, 2].map(i => <div key={i} className="h-48 rounded-xl skeleton" />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 animate-fade-in">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">My Progress</h2>
-        <p className="text-muted-foreground">Track your attendance, scores, and growth over time</p>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Progress</h2>
+        <p className="text-sm text-slate-500 mt-0.5">Your attendance overview across all batches</p>
       </div>
 
-      {/* Overall Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        <StatCard label="Total Sessions Attended" value={overallStats.totalPresent}
-          icon={Calendar} iconColor="text-blue-600 dark:text-blue-400" iconBg="bg-blue-50 dark:bg-blue-950" />
-        <StatCard label="Overall Attendance" value={`${overallStats.avgAttendance}%`}
-          icon={TrendingUp}
-          iconColor={overallStats.avgAttendance >= 80 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}
-          iconBg={overallStats.avgAttendance >= 80 ? 'bg-green-50 dark:bg-green-950' : 'bg-amber-50 dark:bg-amber-950'} />
-        <StatCard label="Months Tracked" value={records.length}
-          icon={BookOpen} iconColor="text-purple-600 dark:text-purple-400" iconBg="bg-purple-50 dark:bg-purple-950" />
-      </div>
-
-      {/* Attendance Chart */}
-      {chartData.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp size={18} className="text-primary" />
-              Attendance Trend (Last 6 Months)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} tickFormatter={v => `${v}%`} />
-                <Tooltip
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter={((value: unknown, name: string | number) => [
-                    `${value}${name === 'attendance' ? '%' : ' pts'}`,
-                    name === 'attendance' ? 'Attendance' : 'Exam Score'
-                  ]) as any}
-                  contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card-bg)' }}
-                />
-                <Line
-                  type="monotone" dataKey="attendance"
-                  stroke="hsl(340, 82%, 52%)" strokeWidth={3} dot={{ r: 5, fill: 'hsl(340, 82%, 52%)' }}
-                />
-                {chartData.some(d => d.examScore !== null) && (
-                  <Line
-                    type="monotone" dataKey="examScore"
-                    stroke="hsl(210, 80%, 55%)" strokeWidth={2} dot={{ r: 4 }} strokeDasharray="5 5"
-                  />
-                )}
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Monthly Cards */}
-      {loading ? (
-        <div className="text-center py-16 text-muted-foreground animate-pulse italic">Loading progress...</div>
-      ) : records.length > 0 ? (
-        <div className="space-y-4">
-          <h3 className="text-lg font-bold">Monthly Breakdown</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {records.map(r => (
-              <Card key={r.id} className="hover:shadow-md transition-all">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h4 className="font-bold text-lg">{MONTH_NAMES[r.month - 1]} {r.year}</h4>
-                      {r.teacher_rating && (
-                        <p className="text-amber-500 text-lg tracking-widest">{getStars(r.teacher_rating)}</p>
-                      )}
-                    </div>
-                    <div className={cn('text-3xl font-black', getAttendanceColor(r.attendance_pct))}>
-                      {r.attendance_pct}%
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {/* Attendance bar */}
-                    <div>
-                      <div className="flex justify-between text-xs text-muted-foreground mb-1 font-medium">
-                        <span>Attendance</span>
-                        <span>{r.present_count} / {r.total_sessions} sessions</span>
-                      </div>
-                      <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                        <div
-                          className={cn('h-full rounded-full transition-all', r.attendance_pct >= 80 ? 'bg-green-500' : r.attendance_pct >= 60 ? 'bg-amber-500' : 'bg-red-500')}
-                          style={{ width: `${r.attendance_pct}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Exam score */}
-                    {r.exam_score !== null && r.exam_total && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Award size={14} className="text-blue-600 shrink-0" />
-                        <span className="text-muted-foreground">Exam Score:</span>
-                        <span className="font-bold text-blue-600">
-                          {r.exam_score} / {r.exam_total} ({Math.round((r.exam_score / r.exam_total) * 100)}%)
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Teacher note */}
-                    {r.performance_note && (
-                      <div className="rounded-lg bg-primary/5 border border-primary/10 p-3">
-                        <p className="text-xs font-bold text-primary mb-1">📝 Teacher's Note</p>
-                        <p className="text-xs text-muted-foreground italic">"{r.performance_note}"</p>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+      {batchProgress.length === 0 ? (
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+          <EmptyState icon={faArrowTrendUp} title="No Progress Data"
+            description="Join a batch and attend classes to see your progress here." />
         </div>
       ) : (
-        <Card className="border-dashed border-2 py-20 text-center">
-          <CardContent className="flex flex-col items-center gap-4">
-            <TrendingUp size={48} className="text-muted-foreground opacity-30" />
-            <div>
-              <h3 className="text-xl font-bold">No progress data yet</h3>
-              <p className="text-muted-foreground mt-1">
-                Your teacher will update your monthly progress after classes begin.
-              </p>
+        <>
+          {/* Overall summary */}
+          {overall !== null && (
+            <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-6 text-white">
+              <p className="text-indigo-200 text-sm mb-2">Overall Attendance</p>
+              <div className="flex items-end gap-3 mb-4">
+                <p className="text-5xl font-bold">{overall}%</p>
+                <p className="text-indigo-200 text-sm mb-2">
+                  {overall >= 75 ? 'Great work! Keep it up.' : 'Needs improvement. Try to attend more classes.'}
+                </p>
+              </div>
+              <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                <div className="h-full bg-white rounded-full transition-all duration-700" style={{ width: `${overall}%` }} />
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          )}
+
+          {/* Per-batch cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {batchProgress.map(bp => (
+              <div key={bp.batch_id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="font-semibold text-slate-900 dark:text-slate-100">{bp.batch_name}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">{bp.total} sessions total</p>
+                  </div>
+                  <div className={`text-2xl font-bold ${bp.pct !== null && bp.pct >= 75 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                    {bp.pct !== null ? `${bp.pct}%` : 'N/A'}
+                  </div>
+                </div>
+                {bp.pct !== null && (
+                  <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mb-4">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${bp.pct >= 75 ? 'bg-emerald-500' : 'bg-red-400'}`}
+                      style={{ width: `${bp.pct}%` }} />
+                  </div>
+                )}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { icon: faCheckCircle, label: 'Present', value: bp.present, color: 'text-emerald-600 dark:text-emerald-400' },
+                    { icon: faClock, label: 'Late', value: bp.late, color: 'text-amber-600 dark:text-amber-400' },
+                    { icon: faCircleXmark, label: 'Absent', value: bp.absent, color: 'text-red-500 dark:text-red-400' },
+                  ].map(s => (
+                    <div key={s.label} className="text-center p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                      <FontAwesomeIcon icon={s.icon} className={`text-sm mb-1 ${s.color}`} />
+                      <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+                      <p className="text-xs text-slate-500">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+                  <FontAwesomeIcon icon={faCalendarDays} className="text-xs" />
+                  {bp.total === 0 ? 'No sessions yet' : `${bp.total} sessions recorded`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
