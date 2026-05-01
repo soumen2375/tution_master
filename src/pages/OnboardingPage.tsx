@@ -162,15 +162,15 @@ export default function OnboardingPage() {
         .from('student_profiles')
         .select('id')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
       if (!student) throw new Error('Student profile not found');
 
       const { data: batch } = await supabase
         .from('batches')
         .select('id, name')
         .eq('invite_code', form.invite_code.toUpperCase())
-        .single();
-      if (!batch) throw new Error('Batch not found');
+        .maybeSingle();
+      if (!batch) throw new Error('Batch not found. Check the invite code and try again.');
 
       await supabase.from('enrollments').insert({
         student_id: student.id,

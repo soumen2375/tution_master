@@ -42,8 +42,8 @@ export default function ProgressPage() {
         if (!batchIds.length) { setLoading(false); return; }
 
         const { data: attData } = await supabase
-          .from('attendance_records')
-          .select('status, session:attendance_sessions(batch_id)')
+          .from('attendance')
+          .select('status, session:sessions(batch_id)')
           .eq('student_id', student.id);
 
         const progMap = new Map<string, { total: number; present: number; late: number; absent: number }>();

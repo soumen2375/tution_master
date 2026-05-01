@@ -82,16 +82,16 @@ export default function AttendancePage() {
     const batchMap = new Map((batchData || []).map(b => [b.id, b.name]));
 
     const { data: sessData } = await supabase
-      .from('attendance_sessions')
-      .select('id, batch_id, session_date, topic')
+      .from('sessions')
+      .select('id, batch_id, date, topic')
       .in('batch_id', batchIds)
-      .order('session_date', { ascending: false });
+      .order('date', { ascending: false });
 
     if (!sessData?.length) { setSessions([]); setLoading(false); return; }
 
     const sessionIds = sessData.map(s => s.id);
     const { data: attData } = await supabase
-      .from('attendance_records')
+      .from('attendance')
       .select('session_id, status')
       .in('session_id', sessionIds);
 
@@ -109,7 +109,7 @@ export default function AttendancePage() {
       id: s.id,
       batch_id: s.batch_id,
       batch_name: batchMap.get(s.batch_id) || '',
-      session_date: s.session_date,
+      session_date: s.date,
       topic: s.topic,
       total: attMap.get(s.id)?.total || 0,
       present: attMap.get(s.id)?.present || 0,
@@ -128,9 +128,11 @@ export default function AttendancePage() {
   async function onAddSession(data: SessionForm) {
     setSaving(true);
     try {
-      const { error } = await supabase.from('attendance_sessions').insert({
+      const { error } = await supabase.from('sessions').insert({
         batch_id: data.batch_id,
-        session_date: data.session_date,
+        date: data.session_date,
+        start_time: '00:00',
+        end_time: '00:00',
         topic: data.topic || null,
       });
       if (error) throw error;
@@ -149,7 +151,7 @@ export default function AttendancePage() {
         .select('student:student_profiles(id, profile:profiles(full_name))')
         .eq('batch_id', session.batch_id)
         .eq('status', 'ACTIVE'),
-      supabase.from('attendance_records')
+      supabase.from('attendance')
         .select('student_id, status')
         .eq('session_id', session.id),
     ]);
@@ -178,9 +180,9 @@ export default function AttendancePage() {
         session_id: markModal.id, student_id: a.student_id, status: attendance[a.student_id] || 'ABSENT',
       }));
       const ops = [];
-      if (toInsert.length) ops.push(supabase.from('attendance_records').insert(toInsert));
+      if (toInsert.length) ops.push(supabase.from('attendance').insert(toInsert));
       for (const rec of toUpdate) {
-        ops.push(supabase.from('attendance_records').update({ status: rec.status }).eq('session_id', markModal.id).eq('student_id', rec.student_id));
+        ops.push(supabase.from('attendance').update({ status: rec.status }).eq('session_id', markModal.id).eq('student_id', rec.student_id));
       }
       await Promise.all(ops);
       toast.success('Attendance saved');
@@ -193,8 +195,8 @@ export default function AttendancePage() {
   async function handleDelete() {
     if (!deleteModal) return;
     try {
-      await supabase.from('attendance_records').delete().eq('session_id', deleteModal.id);
-      const { error } = await supabase.from('attendance_sessions').delete().eq('id', deleteModal.id);
+      await supabase.from('attendance').delete().eq('session_id', deleteModal.id);
+      const { error } = await supabase.from('sessions').delete().eq('id', deleteModal.id);
       if (error) throw error;
       setSessions(prev => prev.filter(s => s.id !== deleteModal.id));
       toast.success('Session deleted');

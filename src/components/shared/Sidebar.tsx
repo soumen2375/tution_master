@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
   faChalkboardUser, faAnglesLeft, faAnglesRight,
-  faGear, faRightFromBracket,
+  faGear, faRightFromBracket, faCopy, faCheck,
 } from '@fortawesome/free-solid-svg-icons';
 import { cn } from '@/lib/utils';
 
@@ -24,14 +24,23 @@ interface SidebarProps {
   onMobileClose: () => void;
   profileName: string;
   onLogout: () => void;
+  uniqueId?: string;
 }
 
 export default function Sidebar({
   navItems, bottomItems = [], role, collapsed, onToggleCollapse,
-  mobileOpen, onMobileClose, profileName, onLogout,
+  mobileOpen, onMobileClose, profileName, onLogout, uniqueId,
 }: SidebarProps) {
   const location = useLocation();
   const sidebarRef = useRef<HTMLElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  function copyId() {
+    if (!uniqueId) return;
+    navigator.clipboard.writeText(uniqueId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -108,13 +117,29 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Role badge */}
+      {/* Role badge + Unique ID */}
       {!collapsed && (
-        <div className="px-4 py-3 shrink-0">
+        <div className="px-4 py-3 space-y-2 shrink-0">
           <div className={cn('flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider', roleColor)}>
             <div className="w-1.5 h-1.5 rounded-full bg-current opacity-70 animate-pulse" />
             {role === 'TEACHER' ? 'Teacher Panel' : 'Student Panel'}
           </div>
+          {uniqueId && (
+            <button onClick={copyId}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors group cursor-pointer"
+              title="Click to copy your ID">
+              <div className="text-left">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium leading-none mb-0.5">
+                  {role === 'TEACHER' ? 'Teacher ID' : 'Student ID'}
+                </p>
+                <p className="text-sm font-mono font-bold text-slate-900 dark:text-slate-100 tracking-wider">{uniqueId}</p>
+              </div>
+              <FontAwesomeIcon
+                icon={copied ? faCheck : faCopy}
+                className={cn('text-xs shrink-0 transition-colors', copied ? 'text-emerald-500' : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300')}
+              />
+            </button>
+          )}
         </div>
       )}
 

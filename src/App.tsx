@@ -36,6 +36,7 @@ import StudentFees from '@/pages/student/FeesPage';
 import StudentNotes from '@/pages/student/NotesPage';
 import StudentProgress from '@/pages/student/ProgressPage';
 import JoinBatch from '@/pages/student/JoinPage';
+import StudentSettings from '@/pages/student/SettingsPage';
 
 export default function App() {
   return (
@@ -83,6 +84,7 @@ export default function App() {
               <Route path="notes" element={<StudentNotes />} />
               <Route path="progress" element={<StudentProgress />} />
               <Route path="join" element={<JoinBatch />} />
+              <Route path="settings" element={<StudentSettings />} />
             </Route>
 
             {/* ── Fallback ── */}

@@ -76,7 +76,7 @@ export default function StudentDashboard() {
       }
 
       const [attRes, feesRes, notesRes, annRes] = await Promise.all([
-        supabase.from('attendance_records').select('id, status, session:attendance_sessions(batch_id)').eq('student_id', studentId),
+        supabase.from('attendance').select('id, status, session:sessions(batch_id)').eq('student_id', studentId),
         supabase.from('fee_payments').select('id', { count: 'exact', head: true }).eq('student_id', studentId).in('status', ['PENDING', 'OVERDUE']),
         supabase.from('notes').select('id', { count: 'exact', head: true }).in('batch_id', batchIds),
         supabase.from('announcements')
@@ -114,7 +114,7 @@ export default function StudentDashboard() {
 
   const statCards = [
     { icon: faChalkboard, label: 'My Batches', value: stats?.totalBatches ?? 0, link: '/student/batches', bg: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' },
-    { icon: faCalendarDays, label: 'Attendance', value: stats?.attendancePct !== null ? `${stats?.attendancePct}%` : 'N/A', link: '/student/attendance', bg: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' },
+    { icon: faCalendarDays, label: 'Attendance', value: stats != null && stats.attendancePct != null ? `${stats.attendancePct}%` : 'N/A', link: '/student/attendance', bg: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' },
     { icon: faMoneyBillWave, label: 'Pending Fees', value: stats?.pendingFees ?? 0, link: '/student/fees', bg: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' },
     { icon: faFolder, label: 'Materials', value: stats?.materialCount ?? 0, link: '/student/notes', bg: 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400' },
   ];

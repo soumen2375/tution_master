@@ -83,7 +83,7 @@ export default function MaterialsPage() {
 
     const { data: notesData, error } = await supabase
       .from('notes')
-      .select('id, batch_id, title, type, url, file_size_kb, created_at')
+      .select('id, batch_id, title, file_type, file_url, file_size_kb, created_at')
       .in('batch_id', batchIds)
       .order('created_at', { ascending: false });
 
@@ -94,8 +94,8 @@ export default function MaterialsPage() {
       batch_id: n.batch_id,
       batch_name: batchMap.get(n.batch_id) || '',
       title: n.title,
-      type: n.type || 'OTHER',
-      url: n.url || '',
+      type: (n.file_type || 'OTHER') as Material['type'],
+      url: n.file_url || '',
       file_size_kb: n.file_size_kb,
       created_at: n.created_at,
     })));
@@ -119,8 +119,8 @@ export default function MaterialsPage() {
       const { error } = await supabase.from('notes').insert({
         batch_id: data.batch_id,
         title: data.title,
-        type: data.type,
-        url: data.url,
+        file_type: data.type,
+        file_url: data.url,
         file_size_kb: data.file_size_kb || null,
       });
       if (error) throw error;

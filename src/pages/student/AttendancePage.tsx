@@ -58,9 +58,9 @@ export default function AttendancePage() {
         if (!batchIds.length) { setLoading(false); return; }
 
         const { data: attData, error } = await supabase
-          .from('attendance_records')
+          .from('attendance')
           .select(`id, status,
-            session:attendance_sessions(id, session_date, topic, batch_id, batch:batches(name))`)
+            session:sessions(id, date, topic, batch_id, batch:batches(name))`)
           .eq('student_id', student.id);
 
         if (error) throw error;
@@ -68,7 +68,7 @@ export default function AttendancePage() {
           .filter((a: any) => batchIds.includes(a.session?.batch_id))
           .map((a: any) => ({
             id: a.id,
-            session_date: a.session?.session_date || '',
+            session_date: a.session?.date || '',
             topic: a.session?.topic || null,
             batch_id: a.session?.batch_id || '',
             batch_name: a.session?.batch?.name || '',

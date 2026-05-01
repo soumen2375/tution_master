@@ -46,7 +46,7 @@ export default function SettingsPage() {
 
       const [{ data: profile }, { data: teacher }] = await Promise.all([
         supabase.from('profiles').select('full_name, phone').eq('id', user.id).single(),
-        supabase.from('teacher_profiles').select('id, bio, institution, subjects, plan').eq('user_id', user.id).single(),
+        supabase.from('teacher_profiles').select('id, teacher_code, bio, institution, subjects, plan').eq('user_id', user.id).single(),
       ]);
 
       if (profile) {
@@ -59,7 +59,7 @@ export default function SettingsPage() {
         });
       }
       if (teacher) {
-        setTeacherId((teacher as any).id);
+        setTeacherId((teacher as any).teacher_code || `TCH-${(teacher as any).id.slice(0, 8).toUpperCase()}`);
         setPlan((teacher as any).plan || 'FREE');
         setSelectedSubjects((teacher as any).subjects || []);
       }
@@ -93,7 +93,7 @@ export default function SettingsPage() {
 
   function copyTeacherId() {
     if (teacherId) {
-      navigator.clipboard.writeText(`TCH-${teacherId.slice(0, 8).toUpperCase()}`);
+      navigator.clipboard.writeText(teacherId);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -126,7 +126,7 @@ export default function SettingsPage() {
             <div>
               <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">Your Teacher ID</p>
               <p className="text-lg font-mono font-bold text-indigo-900 dark:text-indigo-100">
-                {teacherId ? `TCH-${teacherId.slice(0, 8).toUpperCase()}` : '—'}
+                {teacherId || '—'}
               </p>
             </div>
           </div>

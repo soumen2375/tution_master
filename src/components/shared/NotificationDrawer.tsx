@@ -46,21 +46,32 @@ export default function NotificationDrawer({ open, onClose, onUnreadChange }: No
   }, [open]);
 
   useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let channelRef: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
-      channel = supabase
-        .channel('notifications')
+      if (!user || cancelled) return;
+      const ch = supabase
+        .channel(`notifications-${user.id}`)
         .on('postgres_changes', {
           event: 'INSERT', schema: 'public', table: 'notifications',
           filter: `user_id=eq.${user.id}`,
         }, (payload) => {
-          setNotifications(prev => [payload.new as Notification, ...prev]);
-          onUnreadChange(notifications.filter(n => !n.is_read).length + 1);
+          setNotifications(prev => {
+            const updated = [payload.new as Notification, ...prev];
+            onUnreadChange(updated.filter(n => !n.is_read).length);
+            return updated;
+          });
         })
         .subscribe();
+      if (!cancelled) channelRef = ch;
+      else supabase.removeChannel(ch);
     });
-    return () => { channel?.unsubscribe(); };
+
+    return () => {
+      cancelled = true;
+      if (channelRef) supabase.removeChannel(channelRef);
+    };
   }, []);
 
   async function fetchNotifications() {

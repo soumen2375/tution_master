@@ -38,6 +38,7 @@ export default function TeacherLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileName, setProfileName] = useState('Teacher');
+  const [teacherCode, setTeacherCode] = useState<string | undefined>(undefined);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
@@ -50,6 +51,9 @@ export default function TeacherLayout() {
         .from('profiles').select('role, full_name').eq('id', user.id).single();
       if (profile?.role !== 'TEACHER') { navigate('/'); return; }
       setProfileName(profile?.full_name || user.user_metadata?.full_name || 'Teacher');
+      const { data: tp } = await supabase
+        .from('teacher_profiles').select('teacher_code').eq('user_id', user.id).maybeSingle();
+      if (tp?.teacher_code) setTeacherCode(tp.teacher_code);
     }
     checkAuth();
   }, [navigate]);
@@ -85,6 +89,7 @@ export default function TeacherLayout() {
         onMobileClose={() => setMobileOpen(false)}
         profileName={profileName}
         onLogout={handleLogout}
+        uniqueId={teacherCode}
       />
 
       <div className={cn('flex-1 flex flex-col min-w-0 transition-all duration-200', sidebarWidth)}>

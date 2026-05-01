@@ -6,7 +6,7 @@ import TopBar from '@/components/shared/TopBar';
 import { cn } from '@/lib/utils';
 import {
   faChartPie, faBook, faCalendarDays,
-  faMoneyBill, faFolder, faArrowRightToBracket, faChartLine,
+  faMoneyBill, faFolder, faArrowRightToBracket, faChartLine, faGear,
 } from '@fortawesome/free-solid-svg-icons';
 import type { NavItem } from '@/components/shared/Sidebar';
 
@@ -18,6 +18,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Materials',  href: '/student/notes',       icon: faFolder },
   { label: 'Progress',   href: '/student/progress',    icon: faChartLine },
   { label: 'Join Batch', href: '/student/join',        icon: faArrowRightToBracket },
+  { label: 'Settings',   href: '/student/settings',    icon: faGear },
 ];
 
 const PAGE_TITLES: Record<string, string> = {
@@ -37,6 +38,7 @@ export default function StudentLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileName, setProfileName] = useState('Student');
+  const [studentCode, setStudentCode] = useState<string | undefined>(undefined);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
@@ -49,6 +51,9 @@ export default function StudentLayout() {
         .from('profiles').select('role, full_name').eq('id', user.id).single();
       if (profile?.role !== 'STUDENT') { navigate('/'); return; }
       setProfileName(profile?.full_name || user.user_metadata?.full_name || 'Student');
+      const { data: sp } = await supabase
+        .from('student_profiles').select('student_code').eq('user_id', user.id).maybeSingle();
+      if (sp?.student_code) setStudentCode(sp.student_code);
     }
     checkAuth();
   }, [navigate]);
@@ -82,6 +87,7 @@ export default function StudentLayout() {
         onMobileClose={() => setMobileOpen(false)}
         profileName={profileName}
         onLogout={handleLogout}
+        uniqueId={studentCode}
       />
 
       <div className={cn('flex-1 flex flex-col min-w-0 transition-all duration-200', sidebarWidth)}>

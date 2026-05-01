@@ -7,7 +7,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faUsers, faMagnifyingGlass, faPlus, faTrash,
   faChevronLeft, faChevronRight, faFilter,
-  faUser, faEnvelope, faPhone, faCalendar,
+  faPhone, faCalendar,
 } from '@fortawesome/free-solid-svg-icons';
 import Modal from '@/components/shared/Modal';
 import EmptyState from '@/components/shared/EmptyState';
@@ -33,9 +33,7 @@ interface StudentRow {
 interface Batch { id: string; name: string; }
 
 const addSchema = z.object({
-  full_name: z.string().min(2, 'Name required'),
-  email: z.string().email('Valid email required'),
-  phone: z.string().optional(),
+  lookup: z.string().min(6, 'Enter student ID (STU-XXXXXXXX) or phone number'),
   batch_id: z.string().min(1, 'Select a batch'),
 });
 type AddForm = z.infer<typeof addSchema>;
@@ -114,15 +112,57 @@ export default function StudentsPage() {
   async function onAdd(data: AddForm) {
     setSaving(true);
     try {
-      // Check if user exists
-      const { data: profile } = await supabase.from('profiles').select('id').ilike('phone', data.phone || '').maybeSingle();
+      const lookup = data.lookup.trim().toUpperCase();
+      let studentProfileId: string | null = null;
+      let studentName = 'Student';
 
-      // For manual add, we can only add a notification / placeholder since we need a real auth user
-      // In practice we'd use invite flow; here we show a helpful message
-      toast.info('Send the student the join code for the batch instead. Manual add requires a registered account.');
+      if (lookup.startsWith('STU-')) {
+        // Lookup by Student ID
+        const { data: sp } = await supabase
+          .from('student_profiles')
+          .select('id, student_code, profile:profiles(full_name)')
+          .eq('student_code', lookup)
+          .maybeSingle();
+        if (!sp) { toast.error('No student found with that Student ID.'); return; }
+        studentProfileId = sp.id;
+        studentName = (sp as any).profile?.full_name || 'Student';
+      } else {
+        // Lookup by phone number
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .eq('phone', data.lookup.trim())
+          .eq('role', 'STUDENT')
+          .maybeSingle();
+        if (!profile) { toast.error('No registered student found with that phone number.'); return; }
+
+        const { data: sp } = await supabase
+          .from('student_profiles')
+          .select('id')
+          .eq('user_id', profile.id)
+          .maybeSingle();
+        if (!sp) { toast.error('Student has not completed onboarding yet.'); return; }
+        studentProfileId = sp.id;
+        studentName = profile.full_name || 'Student';
+      }
+
+      const { error } = await supabase.from('enrollments').insert({
+        student_id: studentProfileId,
+        batch_id: data.batch_id,
+        status: 'ACTIVE',
+      });
+
+      if (error) {
+        if (error.code === '23505') throw new Error('Student is already enrolled in this batch.');
+        throw error;
+      }
+
+      toast.success(`${studentName} enrolled successfully!`);
       setAddModal(false);
-    } catch {
-      toast.error('Failed to add student');
+      reset();
+      await loadData();
+    } catch (e: any) {
+      toast.error(e.message);
     } finally {
       setSaving(false);
     }
@@ -271,17 +311,13 @@ export default function StudentsPage() {
           </button>
         </>}>
         <div className="space-y-4">
-          <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-400">
-            Students need to register first. Share a batch join code for them to enroll.
+          <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-400">
+            The student must have registered first. Enter their <strong>Student ID</strong> (STU-XXXXXXXX from their settings) or their registered <strong>phone number</strong>.
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Full Name *</label>
-            <input {...register('full_name')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Student name" />
-            {errors.full_name && <p className="text-xs text-red-500 mt-1">{errors.full_name.message}</p>}
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Phone</label>
-            <input {...register('phone')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="+91 98765 43210" />
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Student ID or Phone *</label>
+            <input {...register('lookup')} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono" placeholder="STU-XXXXXXXX or +91 98765 43210" />
+            {errors.lookup && <p className="text-xs text-red-500 mt-1">{errors.lookup.message}</p>}
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Assign to Batch *</label>
